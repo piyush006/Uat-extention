@@ -1,0 +1,19 @@
+{
+  "name": "uat-session-tracker-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node --check src/server.js && node --check src/database/db.js && node --check src/routes/issues.js && node --check src/routes/reports.js && node --check src/services/masking.js && node --check src/services/ids.js && node --check src/services/auth.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "pg": "^8.12.0"
+  }
+}

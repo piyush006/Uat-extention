@@ -1,0 +1,134 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UAT Session Tracker</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+    <link rel="apple-touch-icon" href="assets/favicon-192.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="tracker-logo" aria-hidden="true"><span></span></div>
+        <div>
+          <span class="eyebrow">UAT Issue Dashboard</span>
+          <h1>UAT Issue Dashboard</h1>
+          <p>Review user-reported UAT issues, recent activity, API calls, and masked security values.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <label class="filter">
+          Status
+          <select id="statusFilter">
+            <option value="all">All</option>
+            <option value="new">New</option>
+            <option value="reviewed">Reviewed</option>
+            <option value="closed">Closed</option>
+          </select>
+        </label>
+        <button id="refreshIssues">Refresh</button>
+        <button id="clearAllLogs" class="danger">Clear Logs</button>
+      </div>
+    </header>
+
+    <div id="pageLoader" class="loader-bar" hidden></div>
+    <div id="toast" class="toast" hidden></div>
+
+    <section class="overview-panel" id="overviewPanel">
+      <div class="overview-head">
+        <div>
+          <span class="eyebrow">Issue Insights</span>
+          <h2>Issue Health Summary</h2>
+        </div>
+        <button id="toggleOverview">Hide Insights</button>
+      </div>
+      <div id="overviewInsights" class="insights-grid"></div>
+    </section>
+
+    <main class="layout">
+      <section class="issue-list">
+        <div class="list-header">
+          <strong>Reported Issues</strong>
+          <span id="issueCount">0</span>
+        </div>
+        <div class="date-filters">
+          <div class="filter-title">
+            <strong>Date Filter</strong>
+            <span>Filter reports by created date</span>
+          </div>
+          <label>
+            From
+            <input id="dateFrom" type="text" placeholder="dd/mm/yyyy" inputmode="numeric" />
+          </label>
+          <label>
+            To
+            <input id="dateTo" type="text" placeholder="dd/mm/yyyy" inputmode="numeric" />
+          </label>
+          <div class="date-presets">
+            <button data-date-preset="today">Today</button>
+            <button data-date-preset="7">Last 7 Days</button>
+            <button data-date-preset="30">Last 30 Days</button>
+          </div>
+          <button id="clearDateFilters">Clear Dates</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Issue ID</th>
+              <th>User</th>
+              <th>Time</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="issuesBody"></tbody>
+        </table>
+      </section>
+
+      <section class="issue-detail">
+        <div id="emptyState" class="empty">Select an issue to inspect the session.</div>
+        <div id="detailPanel" hidden>
+          <div class="detail-header">
+            <div>
+              <h2 id="detailTitle"></h2>
+              <p id="detailMeta"></p>
+            </div>
+            <div class="detail-actions">
+              <button id="markNew" data-status-action="new">Mark New</button>
+              <button id="markReviewed" data-status-action="reviewed">Mark Reviewed</button>
+              <button id="markClosed" data-status-action="closed">Close</button>
+              <button id="deleteIssue" class="danger">Delete</button>
+            </div>
+          </div>
+
+          <div class="description">
+            <strong>Description</strong>
+            <p id="description"></p>
+          </div>
+
+          <nav class="tabs">
+            <button class="tab" data-tab="timeline">Timeline</button>
+            <button class="tab active" data-tab="network">Network</button>
+            <button class="tab" data-tab="errors">Errors</button>
+            <button class="tab" data-tab="environment">Environment</button>
+          </nav>
+
+          <div id="timeline" class="tab-panel" hidden></div>
+          <div id="network" class="tab-panel">
+            <div id="methodTabs" class="method-tabs"></div>
+            <div id="networkLogs"></div>
+          </div>
+          <div id="errors" class="tab-panel" hidden></div>
+          <pre id="environment" class="tab-panel" hidden></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="tracker-logo small" aria-hidden="true"><span></span></div>
+      <strong>UAT Tracker by 47Billion.</strong> Copyright (c) 2026 47Billion. All rights reserved.
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>
