@@ -14,6 +14,7 @@ const els = {
   allowedOrigins: document.getElementById("allowedOrigins"),
   userIdentifier: document.getElementById("userIdentifier"),
   captureSensitive: document.getElementById("captureSensitive"),
+  showFloatingWidget: document.getElementById("showFloatingWidget"),
   retentionMinutes: document.getElementById("retentionMinutes"),
   saveSettings: document.getElementById("saveSettings"),
   message: document.getElementById("message")
@@ -38,6 +39,7 @@ async function load() {
   els.allowedOrigins.value = (settings?.allowedOrigins || ["https://uat.example.com"]).join("\n");
   els.userIdentifier.value = settings?.userIdentifier || trackerSnapshot?.session?.userIdentifier || "";
   els.captureSensitive.checked = Boolean(settings?.captureSensitive);
+  els.showFloatingWidget.checked = Boolean(settings?.showFloatingWidget);
   els.retentionMinutes.value = settings?.retentionMinutes || 15;
   applyMinimized(Boolean(settings?.popupMinimized));
 
@@ -158,7 +160,8 @@ async function saveSettings() {
       .filter(Boolean),
     retentionMinutes: Number(els.retentionMinutes.value || 15),
     userIdentifier: els.userIdentifier.value.trim(),
-    captureSensitive: els.captureSensitive.checked
+    captureSensitive: els.captureSensitive.checked,
+    showFloatingWidget: els.showFloatingWidget.checked
   };
 
   const { session, trackerSnapshot } = await chrome.storage.local.get(["session", "trackerSnapshot"]);
@@ -178,7 +181,7 @@ async function saveSettings() {
   }
 
   await sendMessage({ type: "SAVE_SETTINGS", settings });
-  setMessage("Settings saved. Refresh the UAT page.", "success");
+  setMessage("Settings saved. Refresh the UAT page to apply widget visibility.", "success");
 }
 
 async function toggleMinimized() {

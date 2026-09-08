@@ -4,6 +4,7 @@ const DEFAULT_SETTINGS = {
   retentionMinutes: 15,
   userIdentifier: "",
   captureSensitive: false,
+  showFloatingWidget: false,
   maskSelectors: ["[data-uat-mask='true']"]
 };
 

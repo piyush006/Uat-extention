@@ -50,7 +50,9 @@ async function init() {
   bindUiCapture();
   bindErrorCapture();
   bindNetworkCapture();
-  mountDraggableTracker();
+  if (settings.showFloatingWidget === true) {
+    mountDraggableTracker();
+  }
   recordEvent("page_view", { url: location.href, title: document.title });
 }
 
