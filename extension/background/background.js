@@ -14,17 +14,10 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (!saved.settings) {
     await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   }
-  await syncTrackingContentScript(saved.settings || DEFAULT_SETTINGS);
 });
 
 chrome.tabs.onCreated.addListener(tab => {
   inheritTrackingFromOpener(tab).catch(() => {});
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === "loading") {
-    injectTrackedTab(tabId).catch(() => {});
-  }
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
@@ -147,14 +140,19 @@ async function retryPendingReports() {
 
 async function setTrackingEnabled(enabled) {
   const { settings } = await chrome.storage.local.get(["settings"]);
-  const nextSettings = { ...DEFAULT_SETTINGS, ...(settings || {}), trackingEnabled: enabled };
+  const activeOrigin = enabled ? await getActiveTabOrigin() : "";
+  const nextSettings = {
+    ...DEFAULT_SETTINGS,
+    ...(settings || {}),
+    trackingEnabled: enabled,
+    allowedOrigins: mergeAllowedOrigins(settings?.allowedOrigins || DEFAULT_SETTINGS.allowedOrigins, activeOrigin)
+  };
 
   if (!enabled) {
     await chrome.storage.local.remove(["session", "trackerSnapshot", "tabSnapshots", "trackedTabs"]);
   }
 
   await chrome.storage.local.set({ settings: nextSettings });
-  await syncTrackingContentScript(nextSettings);
   if (enabled) {
     await injectActiveTab();
   }
@@ -162,50 +160,18 @@ async function setTrackingEnabled(enabled) {
   return nextSettings;
 }
 
-async function syncTrackingContentScript(settings) {
-  const scripts = await chrome.scripting.getRegisteredContentScripts({ ids: ["uat-session-tracker"] });
-  const registered = scripts.length > 0;
-
-  if (settings.trackingEnabled && !registered) {
-    await chrome.scripting.registerContentScripts([{
-      id: "uat-session-tracker",
-      matches: ["<all_urls>"],
-      js: ["content/content.js"],
-      runAt: "document_start",
-      allFrames: false,
-      persistAcrossSessions: true
-    }]);
-    return;
-  }
-
-  if (!settings.trackingEnabled && registered) {
-    await chrome.scripting.unregisterContentScripts({ ids: ["uat-session-tracker"] });
-  }
-}
-
 async function injectActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const activeTab = tabs[0];
-  if (!activeTab?.id) return;
-
-  await injectTrackedTab(activeTab.id);
-}
-
-async function injectTrackedTab(tabId) {
-  const { settings } = await chrome.storage.local.get(["settings"]);
-  const activeSettings = { ...DEFAULT_SETTINGS, ...(settings || {}) };
-  if (!activeSettings.trackingEnabled) return;
+  if (!activeTab?.id || !isHttpUrl(activeTab.url)) return;
 
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: "PING_TRACKER" });
-    if (response?.ok) {
-      chrome.tabs.sendMessage(tabId, { type: "TRACKING_SETTINGS_CHANGED", settings: activeSettings }).catch(() => {});
-      return;
-    }
+    const response = await chrome.tabs.sendMessage(activeTab.id, { type: "PING_TRACKER" });
+    if (response?.ok) return;
   } catch {}
 
   await chrome.scripting.executeScript({
-    target: { tabId, allFrames: false },
+    target: { tabId: activeTab.id, allFrames: false },
     files: ["content/content.js"]
   }).catch(() => {});
 }
@@ -215,9 +181,52 @@ function notifyTrackedPages(message) {
     tabs
       .filter(tab => tab.id)
       .forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+        sendTabMessageQuiet(tab.id, message);
       });
   });
+}
+
+function sendTabMessageQuiet(tabId, message) {
+  try {
+    chrome.tabs.sendMessage(tabId, message, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch {}
+}
+
+async function getActiveTabOrigin() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = tabs[0];
+  if (!activeTab?.url) return "";
+
+  try {
+    const url = new URL(activeTab.url);
+    if (!isHttpUrl(activeTab.url)) return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+function isHttpUrl(value) {
+  try {
+    const url = new URL(value || "");
+    return ["http:", "https:"].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function mergeAllowedOrigins(origins, activeOrigin) {
+  const cleaned = (Array.isArray(origins) ? origins : [])
+    .map(origin => String(origin || "").trim().replace(/\/+$/g, ""))
+    .filter(Boolean);
+
+  if (activeOrigin && !cleaned.includes(activeOrigin)) {
+    cleaned.push(activeOrigin);
+  }
+
+  return cleaned;
 }
 
 async function saveTabSnapshot(sender, snapshot = {}) {
@@ -391,6 +400,15 @@ async function clearRecordingEverywhere() {
   await Promise.all(
     tabs
       .filter(tab => tab.id)
-      .map(tab => chrome.tabs.sendMessage(tab.id, { type: "CLEAR_PAGE_RECORDING" }).catch(() => {}))
+      .map(tab => new Promise(resolve => {
+        try {
+          chrome.tabs.sendMessage(tab.id, { type: "CLEAR_PAGE_RECORDING" }, () => {
+            void chrome.runtime.lastError;
+            resolve();
+          });
+        } catch {
+          resolve();
+        }
+      }))
   );
 }

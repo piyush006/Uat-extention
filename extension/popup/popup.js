@@ -83,6 +83,9 @@ async function toggleTracking() {
       return;
     }
 
+    if (response.settings) {
+      els.allowedOrigins.value = (response.settings.allowedOrigins || []).join("\n");
+    }
     applyTrackingState(enabled);
     setMessage(
       enabled
