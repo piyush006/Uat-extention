@@ -23,7 +23,7 @@ const SECRET_KEY_PATTERNS = [
   /secret/i
 ];
 
-init();
+init().catch(() => {});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "TRACKING_SETTINGS_CHANGED") {
@@ -363,7 +363,7 @@ function recordNetworkEvent(payload) {
 function pushRolling(key, event) {
   UAT_TRACKER_STATE[key].push(event);
   trimRollingBuffers();
-  persistSnapshot();
+  persistSnapshot().catch(() => {});
 }
 
 function trimRollingBuffers() {
@@ -736,7 +736,7 @@ function bindWidgetDrag(host, handle) {
 }
 
 async function submitCurrentSnapshot(description) {
-  persistSnapshot();
+  await persistSnapshot().catch(() => {});
   const snapshot = await getCombinedSnapshot();
   const session = snapshot.session || UAT_TRACKER_STATE.session;
   const issueId = `UAT-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -844,9 +844,22 @@ function debounce(fn, wait) {
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, response => {
-      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-      resolve(response);
-    });
+    try {
+      if (!chrome?.runtime?.id) {
+        reject(new Error("Extension context is no longer available. Refresh the page."));
+        return;
+      }
+
+      chrome.runtime.sendMessage(message, response => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve(response);
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }

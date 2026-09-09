@@ -261,19 +261,28 @@ function setMessage(message, type = "info") {
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, response => {
-      const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) {
-        reject(new Error(runtimeError.message));
+    try {
+      if (!chrome?.runtime?.id) {
+        reject(new Error("Extension context is no longer available. Reload the extension."));
         return;
       }
 
-      if (!response) {
-        reject(new Error("No response from extension background service."));
-        return;
-      }
+      chrome.runtime.sendMessage(message, response => {
+        const runtimeError = chrome.runtime.lastError;
+        if (runtimeError) {
+          reject(new Error(runtimeError.message));
+          return;
+        }
 
-      resolve(response);
-    });
+        if (!response) {
+          reject(new Error("No response from extension background service."));
+          return;
+        }
+
+        resolve(response);
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
