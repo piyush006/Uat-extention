@@ -6,7 +6,10 @@ const UAT_TRACKER_STATE = {
   pageInstanceId: "",
   events: [],
   networkEvents: [],
-  errors: []
+  errors: [],
+  captureReady: false,
+  hookInjected: false,
+  widgetMounted: false
 };
 
 const SECRET_KEY_PATTERNS = [
@@ -23,6 +26,13 @@ const SECRET_KEY_PATTERNS = [
 init();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "TRACKING_SETTINGS_CHANGED") {
+    handleSettingsChanged(message.settings)
+      .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message?.type !== "CLEAR_PAGE_RECORDING") return;
 
   resetRecordedActivity()
@@ -38,11 +48,43 @@ async function init() {
   UAT_TRACKER_STATE.settings = settings;
   UAT_TRACKER_STATE.tab = config.tab || {};
   UAT_TRACKER_STATE.pageInstanceId = createPageInstanceId();
-  UAT_TRACKER_STATE.enabled =
-    isAllowedLocation(location.href, settings.allowedOrigins || []) ||
-    Boolean(UAT_TRACKER_STATE.tab.inheritedTracking);
+  UAT_TRACKER_STATE.enabled = shouldTrackCurrentPage(settings);
 
   if (!UAT_TRACKER_STATE.enabled) return;
+
+  await startTracking();
+}
+
+async function handleSettingsChanged(settings) {
+  UAT_TRACKER_STATE.settings = settings;
+  const shouldTrack = shouldTrackCurrentPage(settings);
+
+  if (shouldTrack) {
+    UAT_TRACKER_STATE.enabled = true;
+    await startTracking();
+    return;
+  }
+
+  UAT_TRACKER_STATE.enabled = false;
+  removeTrackerWidget();
+}
+
+function shouldTrackCurrentPage(settings) {
+  return Boolean(settings?.trackingEnabled) && (
+    isAllowedLocation(location.href, settings.allowedOrigins || []) ||
+    Boolean(UAT_TRACKER_STATE.tab.inheritedTracking)
+  );
+}
+
+async function startTracking() {
+  if (UAT_TRACKER_STATE.captureReady) {
+    if (UAT_TRACKER_STATE.settings?.showFloatingWidget === true) {
+      mountDraggableTracker();
+    } else {
+      removeTrackerWidget();
+    }
+    return;
+  }
 
   UAT_TRACKER_STATE.session = await getOrCreateSession();
   UAT_TRACKER_STATE.session = await refreshSessionIdentity(UAT_TRACKER_STATE.session);
@@ -50,7 +92,8 @@ async function init() {
   bindUiCapture();
   bindErrorCapture();
   bindNetworkCapture();
-  if (settings.showFloatingWidget === true) {
+  UAT_TRACKER_STATE.captureReady = true;
+  if (UAT_TRACKER_STATE.settings?.showFloatingWidget === true) {
     mountDraggableTracker();
   }
   recordEvent("page_view", { url: location.href, title: document.title });
@@ -177,13 +220,18 @@ function randomHex(bytes) {
 }
 
 function injectNetworkHook() {
+  if (UAT_TRACKER_STATE.hookInjected) return;
+
   const script = document.createElement("script");
   script.src = chrome.runtime.getURL("injected/network-hook.js");
   script.onload = () => script.remove();
   (document.documentElement || document.head).appendChild(script);
+  UAT_TRACKER_STATE.hookInjected = true;
 }
 
 function bindUiCapture() {
+  if (UAT_TRACKER_STATE.uiBound) return;
+
   document.addEventListener("click", event => {
     const target = event.target;
     recordEvent("click", {
@@ -213,9 +261,13 @@ function bindUiCapture() {
   window.addEventListener("popstate", () => {
     recordEvent("navigation", { url: location.href, page: location.pathname });
   });
+
+  UAT_TRACKER_STATE.uiBound = true;
 }
 
 function bindErrorCapture() {
+  if (UAT_TRACKER_STATE.errorBound) return;
+
   window.addEventListener("error", event => {
     recordError("window_error", {
       message: event.message,
@@ -230,16 +282,24 @@ function bindErrorCapture() {
       message: String(event.reason?.message || event.reason || "Unhandled promise rejection")
     });
   });
+
+  UAT_TRACKER_STATE.errorBound = true;
 }
 
 function bindNetworkCapture() {
+  if (UAT_TRACKER_STATE.networkBound) return;
+
   window.addEventListener("message", event => {
     if (event.source !== window || event.data?.type !== "UAT_NETWORK_EVENT") return;
     recordNetworkEvent(event.data.payload);
   });
+
+  UAT_TRACKER_STATE.networkBound = true;
 }
 
 function recordEvent(type, data) {
+  if (!UAT_TRACKER_STATE.enabled || !UAT_TRACKER_STATE.session?.sessionId) return;
+
   pushRolling("events", {
     sessionId: UAT_TRACKER_STATE.session.sessionId,
     timestamp: new Date().toISOString(),
@@ -251,6 +311,8 @@ function recordEvent(type, data) {
 }
 
 function recordError(type, data) {
+  if (!UAT_TRACKER_STATE.enabled || !UAT_TRACKER_STATE.session?.sessionId) return;
+
   const errorEvent = {
     sessionId: UAT_TRACKER_STATE.session.sessionId,
     timestamp: new Date().toISOString(),
@@ -264,6 +326,8 @@ function recordError(type, data) {
 }
 
 function recordNetworkEvent(payload) {
+  if (!UAT_TRACKER_STATE.enabled || !UAT_TRACKER_STATE.session?.sessionId) return;
+
   const event = {
     sessionId: UAT_TRACKER_STATE.session.sessionId,
     timestamp: new Date().toISOString(),
@@ -357,6 +421,13 @@ async function resetRecordedActivity() {
   UAT_TRACKER_STATE.events = [];
   UAT_TRACKER_STATE.networkEvents = [];
   UAT_TRACKER_STATE.errors = [];
+
+  if (!UAT_TRACKER_STATE.enabled) {
+    UAT_TRACKER_STATE.session = null;
+    removeTrackerWidget();
+    return;
+  }
+
   UAT_TRACKER_STATE.session = await getOrCreateSession();
   UAT_TRACKER_STATE.session = await refreshSessionIdentity(UAT_TRACKER_STATE.session);
   await persistSnapshot();
@@ -529,6 +600,7 @@ function mountDraggableTracker() {
   `;
 
   document.documentElement.appendChild(host);
+  UAT_TRACKER_STATE.widgetMounted = true;
 
   const widget = shadow.getElementById("widget");
   const toggle = shadow.getElementById("toggle");
@@ -575,15 +647,34 @@ function mountDraggableTracker() {
 
     if (!confirmed) return;
 
-    await sendMessage({ type: "CLEAR_RECORDING" });
-    updateTrackerWidget(shadow);
-    message.className = "msg success";
-    message.textContent = "Recorded activity cleared. Refresh the page to start a new session.";
+    const clearButton = shadow.getElementById("widgetClear");
+    clearButton.disabled = true;
+    clearButton.classList.add("loading");
+    message.className = "msg";
+    message.textContent = "Clearing recorded activity...";
+
+    try {
+      await sendMessage({ type: "CLEAR_RECORDING" });
+      updateTrackerWidget(shadow);
+      message.className = "msg success";
+      message.textContent = "Recorded activity cleared.";
+    } catch (error) {
+      message.className = "msg error";
+      message.textContent = error?.message || "Unable to clear recorded activity.";
+    } finally {
+      clearButton.disabled = false;
+      clearButton.classList.remove("loading");
+    }
   });
 
   bindWidgetDrag(host, shadow.getElementById("dragHandle"));
   setInterval(() => updateTrackerWidget(shadow), 1000);
   updateTrackerWidget(shadow);
+}
+
+function removeTrackerWidget() {
+  document.getElementById("uat-tracker-widget-host")?.remove();
+  UAT_TRACKER_STATE.widgetMounted = false;
 }
 
 function updateTrackerWidget(shadow) {

@@ -73,6 +73,7 @@ h1 {
 }
 
 .stats div,
+.tracking-control,
 .settings,
 .report-form {
   border: 1px solid #243754;
@@ -80,6 +81,17 @@ h1 {
   background: rgba(15, 23, 42, 0.92);
   padding: 10px;
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.16);
+}
+
+.tracking-control {
+  margin-top: 14px;
+}
+
+.tracking-control p {
+  margin: 8px 0 0;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .stats span {
@@ -171,6 +183,22 @@ button.loading::after {
 button.secondary {
   margin-top: 8px;
   background: #334155;
+}
+
+button.start {
+  background: #16a34a;
+}
+
+button.start:hover {
+  background: #15803d;
+}
+
+button.stop {
+  background: #dc2626;
+}
+
+button.stop:hover {
+  background: #b91c1c;
 }
 
 button.danger {

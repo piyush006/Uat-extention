@@ -10,6 +10,8 @@ const els = {
   clearRecording: document.getElementById("clearRecording"),
   minimizeTracker: document.getElementById("minimizeTracker"),
   trackerBody: document.getElementById("trackerBody"),
+  toggleTracking: document.getElementById("toggleTracking"),
+  trackingHelp: document.getElementById("trackingHelp"),
   apiBaseUrl: document.getElementById("apiBaseUrl"),
   allowedOrigins: document.getElementById("allowedOrigins"),
   userIdentifier: document.getElementById("userIdentifier"),
@@ -25,6 +27,7 @@ load();
 els.sendReport.addEventListener("click", submitReport);
 els.retryReports.addEventListener("click", retryReports);
 els.clearRecording.addEventListener("click", clearRecording);
+els.toggleTracking.addEventListener("click", toggleTracking);
 els.saveSettings.addEventListener("click", saveSettings);
 els.minimizeTracker.addEventListener("click", toggleMinimized);
 
@@ -42,21 +45,53 @@ async function load() {
   els.showFloatingWidget.checked = Boolean(settings?.showFloatingWidget);
   els.retentionMinutes.value = settings?.retentionMinutes || 15;
   applyMinimized(Boolean(settings?.popupMinimized));
+  applyTrackingState(Boolean(settings?.trackingEnabled));
 
   if (!trackerSnapshot?.session) {
     els.status.textContent = pendingReports.length
-      ? `Not tracking. Pending reports: ${pendingReports.length}`
-      : "Not tracking on this page";
+      ? `Tracking off. Pending reports: ${pendingReports.length}`
+      : "Tracking off";
     return;
   }
 
   els.status.textContent = pendingReports.length
-    ? `Tracking. Pending reports: ${pendingReports.length}`
-    : "Tracking";
+    ? `${settings?.trackingEnabled ? "Tracking" : "Tracking off"}. Pending reports: ${pendingReports.length}`
+    : settings?.trackingEnabled ? "Tracking" : "Tracking off";
   els.sessionId.textContent = trackerSnapshot.session.sessionId;
   els.eventCount.textContent = trackerSnapshot.events?.length || 0;
   els.apiCount.textContent = trackerSnapshot.networkEvents?.length || 0;
   els.errorCount.textContent = trackerSnapshot.errors?.length || 0;
+}
+
+async function toggleTracking() {
+  const { settings } = await chrome.storage.local.get(["settings"]);
+  const enabled = !settings?.trackingEnabled;
+
+  try {
+    els.toggleTracking.disabled = true;
+    els.toggleTracking.classList.add("loading");
+    setMessage(enabled ? "Starting recording..." : "Stopping recording...");
+
+    const response = await sendMessage({ type: "SET_TRACKING_ENABLED", enabled });
+    if (!response.ok) {
+      setMessage(response.error || "Unable to update tracking.", "error");
+      return;
+    }
+
+    applyTrackingState(enabled);
+    setMessage(
+      enabled
+        ? "Tracking started. Reproduce the issue now."
+        : "Tracking stopped. Existing unsent recording was cleared.",
+      "success"
+    );
+  } catch (error) {
+    setMessage(error?.message || "Unable to update tracking.", "error");
+  } finally {
+    els.toggleTracking.disabled = false;
+    els.toggleTracking.classList.remove("loading");
+    load();
+  }
 }
 
 async function submitReport() {
@@ -137,6 +172,8 @@ async function clearRecording() {
 
   try {
     els.clearRecording.disabled = true;
+    els.clearRecording.classList.add("loading");
+    setMessage("Clearing recorded activity...");
     await sendMessage({ type: "CLEAR_RECORDING" });
     els.sessionId.textContent = "-";
     els.eventCount.textContent = "0";
@@ -148,10 +185,12 @@ async function clearRecording() {
     setMessage(error?.message || "Unable to clear recorded activity.", "error");
   } finally {
     els.clearRecording.disabled = false;
+    els.clearRecording.classList.remove("loading");
   }
 }
 
 async function saveSettings() {
+  const savedState = await chrome.storage.local.get(["settings"]);
   const settings = {
     apiBaseUrl: els.apiBaseUrl.value.trim().replace(/\/+$/g, ""),
     allowedOrigins: els.allowedOrigins.value
@@ -161,6 +200,7 @@ async function saveSettings() {
     retentionMinutes: Number(els.retentionMinutes.value || 15),
     userIdentifier: els.userIdentifier.value.trim(),
     captureSensitive: els.captureSensitive.checked,
+    trackingEnabled: Boolean(savedState.settings?.trackingEnabled),
     showFloatingWidget: els.showFloatingWidget.checked
   };
 
@@ -198,6 +238,15 @@ function applyMinimized(minimized) {
   els.trackerBody.hidden = minimized;
   els.minimizeTracker.textContent = minimized ? "+" : "-";
   els.minimizeTracker.title = minimized ? "Expand tracker" : "Minimize tracker";
+}
+
+function applyTrackingState(enabled) {
+  els.toggleTracking.textContent = enabled ? "Stop Tracking" : "Start Tracking";
+  els.toggleTracking.className = enabled ? "stop" : "start";
+  els.trackingHelp.textContent = enabled
+    ? "Recording is active. Reproduce the issue, then submit a report."
+    : "Recording is off. Start it only when you are ready to reproduce an issue.";
+  els.sendReport.disabled = !enabled;
 }
 
 function setMessage(message, type = "info") {

@@ -4,6 +4,7 @@ const DEFAULT_SETTINGS = {
   retentionMinutes: 15,
   userIdentifier: "",
   captureSensitive: false,
+  trackingEnabled: false,
   showFloatingWidget: false,
   maskSelectors: ["[data-uat-mask='true']"]
 };
@@ -53,9 +54,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "SAVE_SETTINGS") {
     const nextSettings = { ...DEFAULT_SETTINGS, ...(message.settings || {}) };
-    chrome.storage.local.set({ settings: nextSettings }).then(() => {
+    chrome.storage.local.set({ settings: nextSettings }).then(async () => {
+      await notifyTrackedPages({ type: "TRACKING_SETTINGS_CHANGED", settings: nextSettings });
       sendResponse({ ok: true, settings: nextSettings });
     });
+    return true;
+  }
+
+  if (message?.type === "SET_TRACKING_ENABLED") {
+    setTrackingEnabled(Boolean(message.enabled))
+      .then(settings => sendResponse({ ok: true, settings }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 
@@ -129,6 +138,29 @@ async function retryPendingReports() {
   return { uploaded, remaining: remaining.length };
 }
 
+async function setTrackingEnabled(enabled) {
+  const { settings } = await chrome.storage.local.get(["settings"]);
+  const nextSettings = { ...DEFAULT_SETTINGS, ...(settings || {}), trackingEnabled: enabled };
+
+  if (!enabled) {
+    await chrome.storage.local.remove(["session", "trackerSnapshot", "tabSnapshots", "trackedTabs"]);
+  }
+
+  await chrome.storage.local.set({ settings: nextSettings });
+  await notifyTrackedPages({ type: "TRACKING_SETTINGS_CHANGED", settings: nextSettings });
+  return nextSettings;
+}
+
+async function notifyTrackedPages(message) {
+  const tabs = await chrome.tabs.query({});
+
+  await Promise.all(
+    tabs
+      .filter(tab => tab.id)
+      .map(tab => chrome.tabs.sendMessage(tab.id, message).catch(() => {}))
+  );
+}
+
 async function saveTabSnapshot(sender, snapshot = {}) {
   const { tabSnapshots = {} } = await chrome.storage.local.get(["tabSnapshots"]);
   const tabId = sender.tab?.id ?? snapshot.page?.tabId ?? snapshot.tabId;
@@ -197,7 +229,10 @@ async function getTrackingContext(sender) {
 async function inheritTrackingFromOpener(tab) {
   if (!tab?.id || !tab.openerTabId) return;
 
-  const { trackedTabs = {} } = await chrome.storage.local.get(["trackedTabs"]);
+  const { trackedTabs = {}, settings } = await chrome.storage.local.get(["trackedTabs", "settings"]);
+  const activeSettings = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+  if (!activeSettings.trackingEnabled) return;
+
   const openerState = trackedTabs[String(tab.openerTabId)];
   if (!openerState?.sessionId) return;
 
