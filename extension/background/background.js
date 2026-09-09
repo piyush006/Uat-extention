@@ -14,10 +14,17 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (!saved.settings) {
     await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   }
+  await syncTrackingContentScript(saved.settings || DEFAULT_SETTINGS);
 });
 
 chrome.tabs.onCreated.addListener(tab => {
   inheritTrackingFromOpener(tab).catch(() => {});
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") {
+    injectTrackedTab(tabId).catch(() => {});
+  }
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
@@ -147,8 +154,60 @@ async function setTrackingEnabled(enabled) {
   }
 
   await chrome.storage.local.set({ settings: nextSettings });
+  await syncTrackingContentScript(nextSettings);
+  if (enabled) {
+    await injectActiveTab();
+  }
   notifyTrackedPages({ type: "TRACKING_SETTINGS_CHANGED", settings: nextSettings });
   return nextSettings;
+}
+
+async function syncTrackingContentScript(settings) {
+  const scripts = await chrome.scripting.getRegisteredContentScripts({ ids: ["uat-session-tracker"] });
+  const registered = scripts.length > 0;
+
+  if (settings.trackingEnabled && !registered) {
+    await chrome.scripting.registerContentScripts([{
+      id: "uat-session-tracker",
+      matches: ["<all_urls>"],
+      js: ["content/content.js"],
+      runAt: "document_start",
+      allFrames: false,
+      persistAcrossSessions: true
+    }]);
+    return;
+  }
+
+  if (!settings.trackingEnabled && registered) {
+    await chrome.scripting.unregisterContentScripts({ ids: ["uat-session-tracker"] });
+  }
+}
+
+async function injectActiveTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = tabs[0];
+  if (!activeTab?.id) return;
+
+  await injectTrackedTab(activeTab.id);
+}
+
+async function injectTrackedTab(tabId) {
+  const { settings } = await chrome.storage.local.get(["settings"]);
+  const activeSettings = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+  if (!activeSettings.trackingEnabled) return;
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: "PING_TRACKER" });
+    if (response?.ok) {
+      chrome.tabs.sendMessage(tabId, { type: "TRACKING_SETTINGS_CHANGED", settings: activeSettings }).catch(() => {});
+      return;
+    }
+  } catch {}
+
+  await chrome.scripting.executeScript({
+    target: { tabId, allFrames: false },
+    files: ["content/content.js"]
+  }).catch(() => {});
 }
 
 function notifyTrackedPages(message) {

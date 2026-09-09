@@ -26,6 +26,11 @@ const SECRET_KEY_PATTERNS = [
 init().catch(() => {});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "PING_TRACKER") {
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message?.type === "TRACKING_SETTINGS_CHANGED") {
     sendResponse({ ok: true });
     handleSettingsChanged(message.settings).catch(() => {});
@@ -416,6 +421,10 @@ function getLocalSnapshot() {
 }
 
 function persistSnapshot() {
+  if (!UAT_TRACKER_STATE.enabled || !chrome?.runtime?.id) {
+    return Promise.resolve();
+  }
+
   const snapshot = getLocalSnapshot();
 
   return sendMessage({
@@ -846,12 +855,18 @@ function sendMessage(message) {
   return new Promise((resolve, reject) => {
     try {
       if (!chrome?.runtime?.id) {
+        UAT_TRACKER_STATE.enabled = false;
+        setInjectedTrackingEnabled(false);
         reject(new Error("Extension context is no longer available. Refresh the page."));
         return;
       }
 
       chrome.runtime.sendMessage(message, response => {
         if (chrome.runtime.lastError) {
+          if (chrome.runtime.lastError.message?.includes("Extension context invalidated")) {
+            UAT_TRACKER_STATE.enabled = false;
+            setInjectedTrackingEnabled(false);
+          }
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
