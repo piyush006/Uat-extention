@@ -1,4 +1,5 @@
 (function installUatNetworkHook() {
+  window.__UAT_SESSION_TRACKER_CAPTURE_ENABLED__ = true;
   if (window.__UAT_SESSION_TRACKER_NETWORK_HOOKED__) return;
   window.__UAT_SESSION_TRACKER_NETWORK_HOOKED__ = true;
 
@@ -7,7 +8,16 @@
   const originalSend = XMLHttpRequest.prototype.send;
   const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
 
+  window.addEventListener("message", event => {
+    if (event.source !== window || event.data?.type !== "UAT_TRACKING_STATE") return;
+    window.__UAT_SESSION_TRACKER_CAPTURE_ENABLED__ = Boolean(event.data.enabled);
+  });
+
   window.fetch = async function trackedFetch(input, init = {}) {
+    if (!window.__UAT_SESSION_TRACKER_CAPTURE_ENABLED__) {
+      return originalFetch.apply(this, arguments);
+    }
+
     const startedAt = performance.now();
     const request = normalizeFetchRequest(input, init);
 
@@ -39,6 +49,10 @@
   };
 
   XMLHttpRequest.prototype.open = function trackedOpen(method, url) {
+    if (!window.__UAT_SESSION_TRACKER_CAPTURE_ENABLED__) {
+      return originalOpen.apply(this, arguments);
+    }
+
     this.__uatRequest = {
       method,
       url: new URL(url, location.href).href,
@@ -53,6 +67,10 @@
   };
 
   XMLHttpRequest.prototype.send = function trackedSend(body) {
+    if (!window.__UAT_SESSION_TRACKER_CAPTURE_ENABLED__) {
+      return originalSend.apply(this, arguments);
+    }
+
     const startedAt = performance.now();
     const request = this.__uatRequest || {};
     request.body = parseBody(body);

@@ -54,8 +54,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "SAVE_SETTINGS") {
     const nextSettings = { ...DEFAULT_SETTINGS, ...(message.settings || {}) };
-    chrome.storage.local.set({ settings: nextSettings }).then(async () => {
-      await notifyTrackedPages({ type: "TRACKING_SETTINGS_CHANGED", settings: nextSettings });
+    chrome.storage.local.set({ settings: nextSettings }).then(() => {
+      notifyTrackedPages({ type: "TRACKING_SETTINGS_CHANGED", settings: nextSettings });
       sendResponse({ ok: true, settings: nextSettings });
     });
     return true;
@@ -147,18 +147,18 @@ async function setTrackingEnabled(enabled) {
   }
 
   await chrome.storage.local.set({ settings: nextSettings });
-  await notifyTrackedPages({ type: "TRACKING_SETTINGS_CHANGED", settings: nextSettings });
+  notifyTrackedPages({ type: "TRACKING_SETTINGS_CHANGED", settings: nextSettings });
   return nextSettings;
 }
 
-async function notifyTrackedPages(message) {
-  const tabs = await chrome.tabs.query({});
-
-  await Promise.all(
+function notifyTrackedPages(message) {
+  chrome.tabs.query({}, tabs => {
     tabs
       .filter(tab => tab.id)
-      .map(tab => chrome.tabs.sendMessage(tab.id, message).catch(() => {}))
-  );
+      .forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+      });
+  });
 }
 
 async function saveTabSnapshot(sender, snapshot = {}) {

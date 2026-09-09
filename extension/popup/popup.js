@@ -45,18 +45,23 @@ async function load() {
   els.showFloatingWidget.checked = Boolean(settings?.showFloatingWidget);
   els.retentionMinutes.value = settings?.retentionMinutes || 15;
   applyMinimized(Boolean(settings?.popupMinimized));
-  applyTrackingState(Boolean(settings?.trackingEnabled));
+  const trackingEnabled = Boolean(settings?.trackingEnabled);
+  applyTrackingState(trackingEnabled);
 
   if (!trackerSnapshot?.session) {
+    els.sessionId.textContent = "-";
+    els.eventCount.textContent = "0";
+    els.apiCount.textContent = "0";
+    els.errorCount.textContent = "0";
     els.status.textContent = pendingReports.length
-      ? `Tracking off. Pending reports: ${pendingReports.length}`
-      : "Tracking off";
+      ? `${trackingEnabled ? "Tracking" : "Tracking off"}. Pending reports: ${pendingReports.length}`
+      : trackingEnabled ? "Tracking" : "Tracking off";
     return;
   }
 
   els.status.textContent = pendingReports.length
-    ? `${settings?.trackingEnabled ? "Tracking" : "Tracking off"}. Pending reports: ${pendingReports.length}`
-    : settings?.trackingEnabled ? "Tracking" : "Tracking off";
+    ? `${trackingEnabled ? "Tracking" : "Tracking off"}. Pending reports: ${pendingReports.length}`
+    : trackingEnabled ? "Tracking" : "Tracking off";
   els.sessionId.textContent = trackerSnapshot.session.sessionId;
   els.eventCount.textContent = trackerSnapshot.events?.length || 0;
   els.apiCount.textContent = trackerSnapshot.networkEvents?.length || 0;
@@ -90,7 +95,7 @@ async function toggleTracking() {
   } finally {
     els.toggleTracking.disabled = false;
     els.toggleTracking.classList.remove("loading");
-    load();
+    await load();
   }
 }
 
@@ -144,7 +149,7 @@ async function submitReport() {
   } finally {
     els.sendReport.disabled = false;
     els.sendReport.classList.remove("loading");
-    load();
+    await load();
   }
 }
 
@@ -159,7 +164,7 @@ async function retryReports() {
   } catch (error) {
     setMessage(error?.message || "Retry failed.", "error");
   } finally {
-    load();
+    await load();
   }
 }
 

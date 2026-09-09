@@ -27,10 +27,9 @@ init();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "TRACKING_SETTINGS_CHANGED") {
-    handleSettingsChanged(message.settings)
-      .then(() => sendResponse({ ok: true }))
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
-    return true;
+    sendResponse({ ok: true });
+    handleSettingsChanged(message.settings).catch(() => {});
+    return false;
   }
 
   if (message?.type !== "CLEAR_PAGE_RECORDING") return;
@@ -66,6 +65,11 @@ async function handleSettingsChanged(settings) {
   }
 
   UAT_TRACKER_STATE.enabled = false;
+  UAT_TRACKER_STATE.session = null;
+  UAT_TRACKER_STATE.events = [];
+  UAT_TRACKER_STATE.networkEvents = [];
+  UAT_TRACKER_STATE.errors = [];
+  setInjectedTrackingEnabled(false);
   removeTrackerWidget();
 }
 
@@ -77,26 +81,31 @@ function shouldTrackCurrentPage(settings) {
 }
 
 async function startTracking() {
-  if (UAT_TRACKER_STATE.captureReady) {
-    if (UAT_TRACKER_STATE.settings?.showFloatingWidget === true) {
-      mountDraggableTracker();
-    } else {
-      removeTrackerWidget();
-    }
-    return;
+  setInjectedTrackingEnabled(true);
+
+  const needsSession = !UAT_TRACKER_STATE.session?.sessionId;
+  if (needsSession) {
+    UAT_TRACKER_STATE.session = await getOrCreateSession();
+    UAT_TRACKER_STATE.session = await refreshSessionIdentity(UAT_TRACKER_STATE.session);
   }
 
-  UAT_TRACKER_STATE.session = await getOrCreateSession();
-  UAT_TRACKER_STATE.session = await refreshSessionIdentity(UAT_TRACKER_STATE.session);
-  injectNetworkHook();
-  bindUiCapture();
-  bindErrorCapture();
-  bindNetworkCapture();
-  UAT_TRACKER_STATE.captureReady = true;
+  if (!UAT_TRACKER_STATE.captureReady) {
+    injectNetworkHook();
+    bindUiCapture();
+    bindErrorCapture();
+    bindNetworkCapture();
+    UAT_TRACKER_STATE.captureReady = true;
+  }
+
   if (UAT_TRACKER_STATE.settings?.showFloatingWidget === true) {
     mountDraggableTracker();
+  } else {
+    removeTrackerWidget();
   }
-  recordEvent("page_view", { url: location.href, title: document.title });
+
+  if (needsSession) {
+    recordEvent("page_view", { url: location.href, title: document.title });
+  }
 }
 
 function createPageInstanceId() {
@@ -227,6 +236,10 @@ function injectNetworkHook() {
   script.onload = () => script.remove();
   (document.documentElement || document.head).appendChild(script);
   UAT_TRACKER_STATE.hookInjected = true;
+}
+
+function setInjectedTrackingEnabled(enabled) {
+  window.postMessage({ type: "UAT_TRACKING_STATE", enabled }, "*");
 }
 
 function bindUiCapture() {
