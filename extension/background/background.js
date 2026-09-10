@@ -72,7 +72,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     submitReport(message.report)
       .then(result => sendResponse({ ok: true, ...result }))
       .catch(async error => {
-        await queuePendingReport(message.report);
+        await queuePendingReport(message.report, error);
         sendResponse({ ok: false, queued: true, error: error?.message || String(error) });
       });
     return true;
@@ -97,45 +97,90 @@ async function submitReport(report) {
   const { settings } = await chrome.storage.local.get(["settings"]);
   const apiBaseUrl = (settings?.apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl).replace(/\/+$/g, "");
 
-  const response = await fetch(`${apiBaseUrl}/api/reports`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(report)
-  });
+  let response;
+  try {
+    response = await fetch(`${apiBaseUrl}/api/reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(report)
+    });
+  } catch (error) {
+    throw new Error(`Cannot reach backend ${apiBaseUrl}: ${error?.message || String(error)}`);
+  }
 
-  const data = await response.json().catch(() => ({}));
+  const text = await response.text().catch(() => "");
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = {};
+  }
+
   if (!response.ok || !data.ok) {
-    throw new Error(data.error || `Report upload failed with HTTP ${response.status}`);
+    const detail = data.error || text.slice(0, 240) || `HTTP ${response.status}`;
+    throw new Error(`Report upload failed (${response.status}): ${detail}`);
   }
 
   return { issueId: data.issueId };
 }
 
-async function queuePendingReport(report) {
+async function queuePendingReport(report, error) {
   const { pendingReports = [] } = await chrome.storage.local.get(["pendingReports"]);
-  const exists = pendingReports.some(item => item.issue?.issueId === report.issue?.issueId);
-  if (!exists) {
-    pendingReports.push(report);
-    await chrome.storage.local.set({ pendingReports });
+  const issueId = report?.issue?.issueId;
+  const reason = error?.message || String(error || "");
+  const queuedReport = {
+    ...report,
+    queuedAt: report?.queuedAt || new Date().toISOString(),
+    lastError: reason
+  };
+  const existingIndex = issueId
+    ? pendingReports.findIndex(item => item.issue?.issueId === issueId)
+    : -1;
+
+  if (existingIndex >= 0) {
+    pendingReports[existingIndex] = {
+      ...pendingReports[existingIndex],
+      lastError: reason,
+      lastRetryAt: new Date().toISOString()
+    };
+  } else {
+    pendingReports.push(queuedReport);
   }
+
+  await chrome.storage.local.set({ pendingReports });
 }
 
 async function retryPendingReports() {
   const { pendingReports = [] } = await chrome.storage.local.get(["pendingReports"]);
   const remaining = [];
   const uploaded = [];
+  const failed = [];
 
   for (const report of pendingReports) {
     try {
-      const result = await submitReport(report);
+      const result = await submitReport(withoutQueueMetadata(report));
       uploaded.push(result.issueId);
-    } catch {
-      remaining.push(report);
+    } catch (error) {
+      const reason = error?.message || String(error);
+      failed.push({
+        issueId: report?.issue?.issueId || "unknown",
+        reason
+      });
+      remaining.push({
+        ...report,
+        lastError: reason,
+        lastRetryAt: new Date().toISOString()
+      });
     }
   }
 
   await chrome.storage.local.set({ pendingReports: remaining });
-  return { uploaded, remaining: remaining.length };
+  return { uploaded, remaining: remaining.length, failed };
+}
+
+function withoutQueueMetadata(report) {
+  const { queuedAt, lastError, lastRetryAt, ...cleanReport } = report || {};
+  return cleanReport;
 }
 
 async function setTrackingEnabled(enabled) {

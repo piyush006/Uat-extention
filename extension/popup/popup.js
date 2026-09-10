@@ -158,15 +158,34 @@ async function submitReport() {
 
 async function retryReports() {
   try {
+    els.retryReports.disabled = true;
+    els.retryReports.classList.add("loading");
+    setMessage("Retrying pending reports...");
+
     const response = await sendMessage({ type: "RETRY_PENDING_REPORTS" });
     if (response.ok) {
-      setMessage(`Uploaded ${response.uploaded.length}. Remaining: ${response.remaining}`, "success");
+      const uploadedCount = response.uploaded?.length || 0;
+      const remainingCount = response.remaining || 0;
+      const firstFailure = response.failed?.[0]?.reason;
+
+      if (!uploadedCount && !remainingCount) {
+        setMessage("No pending reports to retry.", "success");
+      } else if (remainingCount) {
+        setMessage(
+          `Uploaded ${uploadedCount}. Remaining: ${remainingCount}.${firstFailure ? ` Last error: ${firstFailure}` : ""}`,
+          "warning"
+        );
+      } else {
+        setMessage(`Uploaded ${uploadedCount}. No pending reports remaining.`, "success");
+      }
     } else {
       setMessage(response.error || "Retry failed.", "error");
     }
   } catch (error) {
     setMessage(error?.message || "Retry failed.", "error");
   } finally {
+    els.retryReports.disabled = false;
+    els.retryReports.classList.remove("loading");
     await load();
   }
 }
